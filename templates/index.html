@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Akıllı Kategori & Toplu Güncelleme ERP</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body class="bg-light p-4">
+    <div class="container bg-white p-4 rounded shadow-sm">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 text-primary"> Akıllı Fiş Takip & Toplu Güncelleme Paneli</h1>
+            <a href="/tara" class="btn btn-success"> Klasörü Tara / Güncelle</a>
+        </div>
+
+        {% if not veriler %}
+            <div class="alert alert-warning text-center">Veritabanında henüz okunmuş fiş bulunamadı. Lütfen Tara butonuna basın.</div>
+        {% endif %}
+
+        {% for f in veriler %}
+            <!-- HER FİŞ İÇİN TEK BİR TOPLU FORM -->
+            <form action="/toplu-guncelle" method="POST">
+                <input type="hidden" name="fis_id" value="{{ f.id }}">
+                
+                <div class="card mb-4 border-secondary shadow-sm">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>. {{ f.firma_adi }}</strong>
+                            <span class="badge bg-secondary ms-2">{{ f.dosya_adi }}</span>
+                        </div>
+                        <div class="text-end">
+                            <span class="me-3"> Tarih: <strong>{{ f.tarih }}</strong></span>
+                            <span class="me-3"> Fiş No: <strong>{{ f.fis_no }}</strong></span>
+                            <span class="badge bg-danger fs-6"> Toplam: {{ f.toplam_tutar }} TL</span>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body">
+                        <table class="table table-sm table-hover border align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Fişte Yazan İsim</th>
+                                    <th>Ana Ürün Kartı / Kategori</th>
+                                    <th class="text-center" style="width:100px;">Miktar</th>
+                                    <th class="text-center" style="width:120px;">Birim</th>
+                                    <th class="text-end" style="width:120px;">B.Fiyatı</th>
+                                    <th class="text-end" style="width:130px;">Satır Toplamı</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for u in f.urunler %}
+                                    <tr>
+                                        <!-- Gizli İdentifier ID'leri -->
+                                        <input type="hidden" name="kalem_ids" value="{{ u.id }}">
+                                        <input type="hidden" name="ham_isimler_{{ u.id }}" value="{{ u.ham_urun_adi }}">
+                                        
+                                        <!-- Fişteki Ham İsim -->
+                                        <td><small class="text-muted font-monospace">{{ u.ham_urun_adi }}</small></td>
+                                        
+                                        <!-- Ana Ürün & Kategori Alanı -->
+                                        <td>
+                                            {% if u.temiz_isim %}
+                                                <span class="badge bg-success fs-6"> {{ u.temiz_isim }}</span>
+                                                <span class="badge bg-info text-dark font-monospace">{{ u.kategori }}</span>
+                                                <a href="/sozluk-sil?ham={{ u.ham_urun_adi }}" class="text-danger text-decoration-none ms-1" title="Eşleşmeyi Sil">❌</a>
+                                            {% else %}
+                                                <div class="d-flex gap-1">
+                                                    <input type="text" name="yeni_ana_{{ u.id }}" class="form-control form-control-sm border-warning" value="{{ u.oneri }}" placeholder="Ana Ürün Adı">
+                                                    <select name="kategori_{{ u.id }}" class="form-select form-select-sm border-warning" style="width:130px;">
+                                                        <option value="Gıda" {% if u.tahmini_kategori == 'Gıda' %}selected{% endif %}>Gıda</option>
+                                                        <option value="Temizlik" {% if u.tahmini_kategori == 'Temizlik' %}selected{% endif %}>Temizlik</option>
+                                                        <option value="Kozmetik" {% if u.tahmini_kategori == 'Kozmetik' %}selected{% endif %}>Kozmetik</option>
+                                                        <option value="Plastik/Züccaciye" {% if u.tahmini_kategori == 'Plastik/Züccaciye' %}selected{% endif %}>Plastik</option>
+                                                        <option value="Elektronik" {% if u.tahmini_kategori == 'Elektronik' %}selected{% endif %}>Elektronik</option>
+                                                        <option value="Giyim" {% if u.tahmini_kategori == 'Giyim' %}selected{% endif %}>Giyim</option>
+                                                        <option value="Finans/Sigorta" {% if u.tahmini_kategori == 'Finans/Sigorta' %}selected{% endif %}>Finans</option>
+                                                    </select>
+                                                </div>
+                                            {% endif %}
+                                        </td>
+                                        
+                                        <!-- Miktar (Virgüllü Görünüm) -->
+                                        <td>
+                                            <input type="text" name="miktar_{{ u.id }}" class="form-control form-control-sm text-center font-monospace" value="{{ u.miktar_str }}">
+                                        </td>
+                                        
+                                        <!-- Sabit Birim Listesi (Dropdown) -->
+                                        <td>
+                                            <select name="birim_{{ u.id }}" class="form-select form-select-sm text-center font-monospace">
+                                                {% for b in birimler %}
+                                                    <option value="{{ b }}" {% if u.birim == b %}selected{% endif %}>{{ b }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                        
+                                        <!-- Birim Fiyatı (Virgüllü Görünüm) -->
+                                        <td class="text-end text-primary font-monospace fw-bold align-middle">
+                                            {{ u.birim_fiyat_str }} TL
+                                        </td>
+                                        
+                                        <!-- Satır Toplamı (Virgüllü Görünüm) -->
+                                        <td>
+                                            <input type="text" name="satir_toplam_{{ u.id }}" class="form-control form-control-sm text-end font-monospace text-success fw-bold" value="{{ u.satir_toplam_str }}">
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- FİŞİN EN ALTINDAKİ TEK TOPLU KAYDET BUTONU -->
+                    <div class="card-footer bg-light text-end py-2">
+                        <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold">
+                             Bu Fişteki Tüm Değişiklikleri Kaydet
+                        </button>
+                    </div>
+                </div>
+            </form>
+        {% endfor %}
+    </div>
+</body>
+</html>

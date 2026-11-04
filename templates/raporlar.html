@@ -1,0 +1,187 @@
+{% extends "layout.html" %}
+{% block title %}Harcama Raporları & AI Analiz{% endblock %}
+{% block content %}
+
+<!-- 1. DETAYLI FİLTRE PANELİ -->
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-header bg-primary text-white fw-bold d-flex justify-content-between align-items-center">
+        <span>🔍 Gelişmiş Harcama Filtreleme Paneli</span>
+        <a href="/raporlar" class="btn btn-sm btn-light py-0 fw-bold">Filtreleri Temizle</a>
+    </div>
+    <div class="card-body bg-white">
+        <form action="/raporlar" method="GET" class="row g-3">
+            <!-- Market Filtresi -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Market / Firma</label>
+                <select name="firma" class="form-select form-select-sm">
+                    <option value="">Tümü</option>
+                    {% for f in firmalar %}
+                        <option value="{{ f }}" {% if filtreler.firma == f %}selected{% endif %}>{{ f }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Şube Filtresi -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Şube</label>
+                <select name="sube" class="form-select form-select-sm">
+                    <option value="">Tümü</option>
+                    {% for s in subeler %}
+                        {% if s %}
+                            <option value="{{ s }}" {% if filtreler.sube == s %}selected{% endif %}>{{ s }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Kategori Filtresi -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Kategori</label>
+                <select name="kategori" class="form-select form-select-sm">
+                    <option value="">Tümü</option>
+                    {% for k in kategoriler %}
+                        <option value="{{ k }}" {% if filtreler.kategori == k %}selected{% endif %}>{{ k }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Ürün Adı Arama -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Ürün / Arama Metni</label>
+                <input type="text" name="urun_adi" class="form-control form-control-sm" placeholder="Örn: Süt, Kahve..." value="{{ filtreler.urun_adi }}">
+            </div>
+
+            <!-- Tarih Aralığı -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Başlangıç Tarihi</label>
+                <input type="date" name="bas_tarih" class="form-control form-control-sm" value="{{ filtreler.bas_tarih }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Bitiş Tarihi</label>
+                <input type="date" name="bit_tarih" class="form-control form-control-sm" value="{{ filtreler.bit_tarih }}">
+            </div>
+
+            <!-- Fiyat Aralığı -->
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">Min Tutar (TL)</label>
+                <input type="number" step="0.01" name="min_tutar" class="form-control form-control-sm" placeholder="0" value="{{ filtreler.min_tutar }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">Maks Tutar (TL)</label>
+                <input type="number" step="0.01" name="maks_tutar" class="form-control form-control-sm" placeholder="10000" value="{{ filtreler.maks_tutar }}">
+            </div>
+
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold">⚡ Filtrele & Raporla</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 2. HIZLI ÖZET METRİKLERİ -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 bg-primary text-white shadow-sm p-3 rounded-3">
+            <div class="small fw-bold">Toplam Harcama Tutarı</div>
+            <div class="fs-4 fw-bold mt-1">{{ toplam_tutar_str }} TL</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 bg-success text-white shadow-sm p-3 rounded-3">
+            <div class="small fw-bold">Filtrelenen Fiş Sayısı</div>
+            <div class="fs-4 fw-bold mt-1">{{ toplam_fis_sayisi }} Adet</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 bg-info text-white shadow-sm p-3 rounded-3">
+            <div class="small fw-bold">Toplam Ürün Kalemi</div>
+            <div class="fs-4 fw-bold mt-1">{{ toplam_kalem_sayisi }} Kalem</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 bg-dark text-white shadow-sm p-3 rounded-3">
+            <div class="small fw-bold">Ortalama Fiş Tutarı</div>
+            <div class="fs-4 fw-bold mt-1">{{ ortalama_fis_str }} TL</div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. GRAFİK KARTLARI (KATEGORİ VEYA MARKET GÖRSELLEŞTİRME) -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm p-3 h-100">
+            <h6 class="fw-bold text-secondary mb-3">🍕 Kategorilere Göre Harcama Dağılımı</h6>
+            <div style="max-height: 280px;" class="d-flex justify-content-center">
+                <canvas id="kategoriChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm p-3 h-100">
+            <h6 class="fw-bold text-secondary mb-3">🏪 Marketlere Göre Harcama Dağılımı</h6>
+            <div style="max-height: 280px;" class="d-flex justify-content-center">
+                <canvas id="marketChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 4. YAPAY ZEKA DEĞERLENDİRME PANELİ (GROQ AI INSIGHTS) -->
+<div class="card border-0 shadow-sm mb-4 border-start border-4 border-warning">
+    <div class="card-header bg-white border-0 pt-3 d-flex align-items-center gap-2">
+        <span class="fs-4">🤖</span>
+        <h5 class="m-0 fw-bold text-dark">Yapay Zeka Harcama & Bütçe Analizi</h5>
+    </div>
+    <div class="card-body text-secondary lead fs-6 lh-lg">
+        {% if ai_yorum %}
+            {{ ai_yorum | safe }}
+        {% else %}
+            <p class="text-muted italic m-0">Henüz yeterli veri seçilmedi veya analiz üretilmedi.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- CHART.JS GRAFİK KODLARI -->
+<script>
+    // Kategori Grafiği (Doughnut / Pasta)
+    const katLabels = '{{ kat_labels | tojson }}'; // Tırnak içine alındı
+    const katData = '{{ kat_data | tojson }}';
+    
+    new Chart(document.getElementById('kategoriChart'), {
+        type: 'doughnut',
+        data: {
+            labels: JSON.parse(katLabels.replace(/&quot;/g, '"')),
+            datasets: [{
+                data: JSON.parse(katData.replace(/&quot;/g, '"')),
+                backgroundColor: ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#0dcaf0', '#6c757d', '#6610f2', '#fd7e14', '#20c997']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    // Market Grafiği (Bar / Sütun)
+    const marketLabels = '{{ market_labels | tojson }}';
+    const marketData = '{{ market_data | tojson }}';
+
+    new Chart(document.getElementById('marketChart'), {
+        type: 'bar',
+        data: {
+            labels: JSON.parse(marketLabels.replace(/&quot;/g, '"')),
+            datasets: [{
+                label: 'Harcama Tutarı (TL)',
+                data: JSON.parse(marketData.replace(/&quot;/g, '"')),
+                backgroundColor: '#0d6efd'
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+</script>
+
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+{% block title %}Fiş Listesi{% endblock %}
+{% block content %}
+
+<!-- RAPORLAR SAYFASI FORMATINDA MODERN BAŞLIK KARTI -->
+<div class="card border-0 shadow-sm mb-4 border-start border-4 border-primary">
+    <div class="card-body bg-white py-3 d-flex justify-content-between align-items-center">
+        <div>
+            <h4 class="m-0 fw-bold text-dark">📋 Fiş Listesi</h4>
+            <small class="text-muted">Sisteme yüklenen tüm fişlerin genel özeti ve detay yönetimi</small>
+        </div>
+        <a href="/tara" class="btn btn-success btn-sm fw-bold">➕ Yeni Fiş Tara</a>
+    </div>
+</div>
+
+<!-- FİŞLER TABLOSU -->
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle m-0">
+                <!-- SÜTUN BAŞLIKLARI ZEMİNİ #2c3e50 YAPILDI -->
+                <thead style="background-color: red; color: white;">
+                    <tr>
+                        <th class="py-3 ps-3">Firma / Mağaza</th>
+                        <th class="py-3">Şube</th>
+                        <th class="py-3">Tarih</th>
+                        <th class="py-3">Fiş No</th>
+                        <th class="py-3 text-end">Toplam Tutar</th>
+                        <th class="py-3 text-center" style="width: 140px;">İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in fisler %}
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark">{{ f.firma_adi }}</td>
+                            <td><span class="badge bg-light text-dark border">{{ f.sube_adi if f.sube_adi else '-' }}</span></td>
+                            <td class="font-monospace text-muted">{{ f.tarih }}</td>
+                            <td class="font-monospace text-muted">{{ f.fis_no }}</td>
+                            <td class="text-end fw-bold text-primary font-monospace">{{ f.toplam_tutar_formatted }} TL</td>
+                            <td class="text-center">
+                                <a href="/fis/{{ f.id }}" class="btn btn-outline-primary btn-sm fw-bold">🔍 Detay</a>
+                                <a href="/fis-sil/{{ f.id }}" class="btn btn-outline-danger btn-sm" onclick="return confirm('Bu fişi silmek istediğinize emin misiniz?');">🗑️</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-muted">Henüz sisteme taranmış fiş bulunmuyor. Üst menüden "Klasörü Tara" butonuna tıklayabilirsiniz.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
