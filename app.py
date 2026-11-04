@@ -6,8 +6,10 @@ from groq import Groq
 from rapidfuzz import fuzz
 
 app = Flask(__name__)
-app.secret_key = "cok-gizli-bir-anahtar-kelime"  # OTURUM İÇİN KESİNLİKLE GEREKLİ
-client = Groq(api_key="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", timeout=60.0)
+app.secret_key = "cok-gizli-bir-anahtar-kelime"
+
+# Güvenli tanım: API anahtarını kodda açık bırakmıyoruz, sistemden okutuyoruz
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"), timeout=60.0)
 
 DB_FILE = "veritabanı.db"
 
