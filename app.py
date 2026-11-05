@@ -129,21 +129,39 @@ def kategori_tahmin_et(urun_adi):
         if any(k in u for k in kelimeler): return kat
     return "Gıda"
 
-def fisleri_tara_ve_kaydet():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    fisler = [f for f in os.listdir(".") if f.startswith("deneme_fis") and f.lower().endswith((".jpeg", ".jpg"))]
+@app.route('/tara', methods=['POST'])
+def tara():
+    if 'fis_dosyasi' not in request.files:
+        return redirect(url_for('ana_sayfa'))
     
-    c.execute("SELECT ocr_firma, temiz_firma, sube_adi FROM firma_sozlugu")
-    market_hafizasi = c.fetchall()
-
-    for fis in fisler:
-        c.execute("SELECT id FROM fisler WHERE dosya_adi = ?", (fis,))
-        if c.fetchone(): continue
-        print(f"\n-> {fis} TARANIYOR...")
+    file = request.files['fis_dosyasi']
+    if file.filename == '':
+        return redirect(url_for('ana_sayfa'))
+    
+    if file:
         try:
-            b64 = encode_and_resize_image(fis)
+            # 1. Dosyayı diske kaydetmeden doğrudan belleğe (RAM'e) alıyoruz
+            file_bytes = file.read()
+            image = Image.open(io.BytesIO(file_bytes))
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+                
+            # Boyutlandır ve base64 yap
+            image.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG", quality=75)
+            b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
             
+            # Rastgele bir dosya adı kimliği (veritabanı çakışmasını önlemek için)
+            dosya_adi_key = f"mobil_fis_{int(time.time())}.jpg"
+            
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            
+            c.execute("SELECT ocr_firma, temiz_firma, sube_adi FROM firma_sozlugu")
+            market_hafizasi = c.fetchall()
+
+            # --- QWEN İLE ÜST BİLGİLERİ OKU ---
             res1 = client.chat.completions.create(
                 model="qwen/qwen3.8-27b", max_tokens=150,
                 messages=[{"role": "user", "content": [{"type": "text", "text": "Bu fişin üst bilgilerini aralarına '###' koyarak tam olarak şu sırada tek satırda yaz: Firma Adı ### Şube Adı ### Tarih ### Fiş No ### Toplam Tutar. Eğer şube adı yoksa '-' yaz. Başka hiçbir şey yazma."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}])
@@ -154,7 +172,7 @@ def fisleri_tara_ve_kaydet():
             tarih = p1[2] if len(p1) > 2 else (p1[1] if len(p1) > 1 else "-")
             f_no = p1[3] if len(p1) > 3 else "-"
             t_tutar = p1[4] if len(p1) > 4 else (p1[3] if len(p1) > 3 else "-")
-            time.sleep(2)
+            time.sleep(1)
             
             f_adi = ham_f_adi
             for k_ocr, k_temiz, k_sube in market_hafizasi:
@@ -163,12 +181,13 @@ def fisleri_tara_ve_kaydet():
                     if k_sube: sube = k_sube
                     break
             
+            # --- QWEN İLE ÜRÜNLERİ OKU ---
             res2 = client.chat.completions.create(
                 model="qwen/qwen3.8-27b", max_tokens=600,
                 messages=[{"role": "user", "content": [{"type": "text", "text": "Bu fişteki tüm ürünleri satır satır bul. Her satırı aralarında sadece '*' koyarak tam olarak şu düzende yaz: Miktar * Birim * Ürün Adı * Satır Toplam Tutar. Örnek: 1 * AD * PANTENE SAMPUAN * 300,00. Başka açıklama ekleme, direkt listeyle başla."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}])
             
             c.execute("INSERT INTO fisler (dosya_adi, firma_adi, ham_firma_adi, sube_adi, tarih, fis_no, toplam_tutar) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                      (fis, f_adi, ham_f_adi, sube, tarih, f_no, t_tutar))
+                      (dosya_adi_key, f_adi, ham_f_adi, sube, tarih, f_no, t_tutar))
             fid = c.lastrowid
             
             urun_metni = get_content_safely(res2)
@@ -194,11 +213,11 @@ def fisleri_tara_ve_kaydet():
                               (fid, h_isim, au_id, mlar, birim, bf, tot, tahmini_kat))
             
             conn.commit()
-            print(f" ✓ {fis} işlendi.")
-            time.sleep(2)
+            conn.close()
         except Exception as e:
-            print(f" X {fis} hata: {e}")
-    conn.close()
+            print(f"Fiş tarama hatası: {e}")
+            
+    return redirect(url_for('ana_sayfa'))
 
 @app.route('/')
 def ana_sayfa():
@@ -518,10 +537,6 @@ def sozluk_sil():
     conn.close()
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
-@app.route('/tara')
-def tara():
-    fisleri_tara_ve_kaydet()
-    return redirect(url_for('ana_sayfa'))
 
 # KULLANICI GİRİŞ SAYFASI
 @app.route('/giris', methods=['GET', 'POST'])
