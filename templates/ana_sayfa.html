@@ -9,7 +9,10 @@
             <h4 class="m-0 fw-bold text-dark">📋 Fiş Listesi</h4>
             <small class="text-muted">Sisteme yüklenen tüm fişlerin genel özeti ve detay yönetimi</small>
         </div>
-        <a href="/tara" class="btn btn-success btn-sm fw-bold">➕ Yeni Fiş Tara</a>
+        <form action="/tara" method="POST" enctype="multipart/form-data" id="anaFisForm" class="m-0">
+            <input type="file" name="fis_dosyasi" id="anaFileInput" accept="image/*" capture="environment" style="display: none;" onchange="document.getElementById('anaFisForm').submit();">
+            <button type="button" onclick="document.getElementById('anaFileInput').click();" class="btn btn-success btn-sm fw-bold">➕ Yeni Fiş Tara</button>
+        </form>
     </div>
 </div>
 
@@ -19,7 +22,7 @@
         <div class="table-responsive">
             <table class="table table-hover align-middle m-0">
                 <!-- SÜTUN BAŞLIKLARI ZEMİNİ #2c3e50 YAPILDI -->
-                <thead style="background-color: red; color: white;">
+                <thead style="background-color: #2c3e50; color: white;">
                     <tr>
                         <th class="py-3 ps-3">Firma / Mağaza</th>
                         <th class="py-3">Şube</th>
