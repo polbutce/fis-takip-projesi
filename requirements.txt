@@ -2,3 +2,5 @@ Flask
 groq
 rapidfuzz
 Pillow
+python-dotenv
+gunicorn
