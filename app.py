@@ -4,6 +4,7 @@ from flask import Flask, render_template, redirect, url_for, request, session
 from PIL import Image
 from groq import Groq
 from rapidfuzz import fuzz
+from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "cok-gizli-bir-anahtar-kelime"
@@ -530,8 +531,12 @@ def giris():
         kullanici = request.form.get('kullanici')
         sifre = request.form.get('sifre')
         
-        # Basit ve güvenli admin kontrolü (İleride veritabanından da çekilebilir)
-        if kullanici == "admin" and sifre == "no1605":
+        # .env dosyasından veya Render Environment değişkenlerinden okur
+        admin_kullanici = os.environ.get("ADMIN_USER", "admin")
+        admin_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
+        
+        # Kullanıcı adı doğru ve şifre hash eşleşmesi başarılıysa
+        if kullanici == admin_kullanici and check_password_hash(admin_hash, sifre):
             session['giris_yapildi'] = True
             return redirect(url_for('ana_sayfa'))
         else:
@@ -555,5 +560,8 @@ def oturum_kontrol():
 
 if __name__ == '__main__':
     init_db()
-    fisleri_tara_ve_kaydet()
-    app.run(debug=True, port=5000, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+else:
+    # Gunicorn ile çalışırken tabloların hazır olmasını sağlar
+    init_db()
