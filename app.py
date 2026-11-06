@@ -5,13 +5,14 @@ from PIL import Image
 from groq import Groq
 from rapidfuzz import fuzz
 from werkzeug.security import check_password_hash
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = "cok-gizli-bir-anahtar-kelime"
 
-# Güvenli tanım: API anahtarını kodda açık bırakmıyoruz, sistemden okutuyoruz
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"), timeout=60.0)
-
 DB_FILE = "veritabanı.db"
 
 STANDART_BIRIMLER = [
@@ -20,8 +21,9 @@ STANDART_BIRIMLER = [
 ]
 
 KATEGORILER = [
-    "Gıda", "Temizlik", "Kozmetik", "Kırtasiye", "Hırdavat", 
-    "Giyim", "Sağlık", "Ulaşım", "Plastik/Züccaciye", "Elektronik", "Finans/Sigorta"
+    "Gıda", "Temizlik", "Kozmetik", "İlaç", "Züccaciye / Mutfak", 
+    "Kırtasiye", "Hırdavat", "Giyim", "Sağlık", "Ulaşım", 
+    "Plastik/Züccaciye", "Elektronik", "Finans/Sigorta"
 ]
 
 def init_db():
@@ -43,13 +45,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
-def encode_and_resize_image(p, max_size=(800, 800)):
-    with Image.open(p) as img:
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        img.convert('RGB').save(buf, format="JPEG", quality=75)
-        return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 def get_content_safely(res):
     if not res or not hasattr(res, 'choices'): return ""
@@ -113,15 +108,17 @@ def birim_standartlastir(birim_raw):
 def kategori_tahmin_et(urun_adi):
     u = urun_adi.upper()
     havuz = {
+        "İlaç": ["ILAC", "ECZANE", "ASPIRIN", "VITAMIN", "AGrı", "SYRUP", "KAPSUL", "TABLET"],
+        "Züccaciye / Mutfak": ["STREÇ", "STREC", "PECETE", "PEÇETE", "PIPET", "FOLYO", "KASE", "BARDAK", "TABAK", "SÜNGER", "SUNGER"],
         "Kozmetik": ["DEODORANT", "JEL", "SHAMPOO", "SAMPUAN", "CREME", "KREM", "PARFUM", "RUJ", "AGIZ", "PANTENE"],
         "Temizlik": ["SABUN", "DETERJAN", "DOMESTOS", "PEROS", "MATIK", "YUZEY", "HAVLU", "SPREY", "MARC", "BULASIK", "CAMASIR"],
         "Gıda": ["SUT", "KIYMA", "KOFT", "BONFILE", "ET", "PILIÇ", "YAG", "ZEYTIN", "MISIR", "CAFE", "KAHVE", "SU", "AYRAN", "CIPS", "PEYNIR", "EKMEK", "DARDANEL", "ÇEKİRDEK", "YUKSUK", "MAKARNA"],
         "Kırtasiye": ["KALEM", "DEFTER", "SILGI", "KAGIT", "AJANDA", "BANT", "DOSYA", "MAKAS", "FOTOKOPI"],
         "Hırdavat": ["VIDA", "CIVATA", "MATKOP", "CATER", "ÇEKİÇ", "TORNAVIDA", "SILIKON", "TENT", "KONTROL", "PENSE", "MISIN"],
         "Giyim": ["GÖMLEK", "PANTOLON", "CORAP", "AYAKKABI", "T-SHIRT", "KAZAK", "MONT"],
-        "Sağlık": ["ILAC", "ECZANE", "BANDAN", "VITAMIN", "ASPIRIN", "MASK", "KOLONYA"],
+        "Sağlık": ["BANDAN", "MASK", "KOLONYA"],
         "Ulaşım": ["AKBIL", "BENZIN", "MAZOT", "OTOPARK", "TAKSI", "METRO"],
-        "Plastik/Züccaciye": ["POŞET", "KASA", "TABAK", "BARDAK", "PLASTIK", "BIÇAK"],
+        "Plastik/Züccaciye": ["POŞET", "KASA", "PLASTIK", "BIÇAK"],
         "Elektronik": ["AMPUL", "PIL", "KABLO", "SARJ", "TV", "LED"],
         "Finans/Sigorta": ["SİGORTA", "POLİÇE", "TEKLİF", "ARACILIK"]
     }
@@ -140,19 +137,16 @@ def tara():
     
     if file:
         try:
-            # 1. Dosyayı diske kaydetmeden doğrudan belleğe (RAM'e) alıyoruz
             file_bytes = file.read()
             image = Image.open(io.BytesIO(file_bytes))
             if image.mode != 'RGB':
                 image = image.convert('RGB')
                 
-            # Boyutlandır ve base64 yap
             image.thumbnail((800, 800), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
             image.save(buf, format="JPEG", quality=75)
             b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
             
-            # Rastgele bir dosya adı kimliği (veritabanı çakışmasını önlemek için)
             dosya_adi_key = f"mobil_fis_{int(time.time())}.jpg"
             
             conn = sqlite3.connect(DB_FILE)
@@ -161,7 +155,10 @@ def tara():
             c.execute("SELECT ocr_firma, temiz_firma, sube_adi FROM firma_sozlugu")
             market_hafizasi = c.fetchall()
 
-            # --- QWEN İLE ÜST BİLGİLERİ OKU ---
+            # Hafızadaki ana ürünleri ve sözlüğü çek (%80 eşleşme için)
+            c.execute("SELECT us.ham_isim, au.id, au.temiz_urun_adi, au.kategori FROM urun_sozlugu us JOIN ana_urunler au ON us.ana_urun_id = au.id")
+            urun_hafizasi = c.fetchall()
+
             res1 = client.chat.completions.create(
                 model="qwen/qwen3.8-27b", max_tokens=150,
                 messages=[{"role": "user", "content": [{"type": "text", "text": "Bu fişin üst bilgilerini aralarına '###' koyarak tam olarak şu sırada tek satırda yaz: Firma Adı ### Şube Adı ### Tarih ### Fiş No ### Toplam Tutar. Eğer şube adı yoksa '-' yaz. Başka hiçbir şey yazma."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}])
@@ -181,7 +178,6 @@ def tara():
                     if k_sube: sube = k_sube
                     break
             
-            # --- QWEN İLE ÜRÜNLERİ OKU ---
             res2 = client.chat.completions.create(
                 model="qwen/qwen3.8-27b", max_tokens=600,
                 messages=[{"role": "user", "content": [{"type": "text", "text": "Bu fişteki tüm ürünleri satır satır bul. Her satırı aralarında sadece '*' koyarak tam olarak şu düzende yaz: Miktar * Birim * Ürün Adı * Satır Toplam Tutar. Örnek: 1 * AD * PANTENE SAMPUAN * 300,00. Başka açıklama ekleme, direkt listeyle başla."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}])
@@ -205,9 +201,13 @@ def tara():
                     bf = round(tot / mlar, 2) if mlar > 0 else tot
                     tahmini_kat = kategori_tahmin_et(h_isim)
                     
-                    c.execute("SELECT ana_urun_id FROM urun_sozlugu WHERE ham_isim = ?", (h_isim,))
-                    row = c.fetchone()
-                    au_id = row[0] if row else None
+                    # Hafızadan %80 eşleşme kontrolü
+                    au_id = None
+                    for h_ham, a_id, a_temiz, a_kat in urun_hafizasi:
+                        if fuzz.token_sort_ratio(h_isim.upper(), h_ham.upper()) >= 80:
+                            au_id = a_id
+                            tahmini_kat = a_kat
+                            break
                     
                     c.execute("INSERT INTO urun_kalemleri (fis_id, ham_urun_adi, ana_urun_id, miktar, birim, birim_fiyat, satir_toplam, tahmini_kategori) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
                               (fid, h_isim, au_id, mlar, birim, bf, tot, tahmini_kat))
@@ -311,25 +311,15 @@ def toplu_guncelle():
     yeni_tarih = request.form.get('tarih', '').strip()
     yeni_fis_no = request.form.get('fis_no', '').strip()
     
-    c.execute("UPDATE fisler SET firma_adi=?, sube_adi=?, tarih=?, fis_no=? WHERE id=?", 
-              (yeni_firma, yeni_sube, yeni_tarih, yeni_fis_no, fis_id))
-    
-    c.execute("SELECT ham_firma_adi FROM fisler WHERE id = ?", (fis_id,))
-    row_f = c.fetchone()
-    ham_f = row_f[0] if row_f and row_f[0] else yeni_firma
-    
-    c.execute("""
-        INSERT INTO firma_sozlugu (ocr_firma, temiz_firma, sube_adi) 
-        VALUES (?, ?, ?) 
-        ON CONFLICT(ocr_firma) 
-        DO UPDATE SET temiz_firma = ?, sube_adi = ?
-    """, (ham_f, yeni_firma, yeni_sube, yeni_firma, yeni_sube))
-
+    # Güncellenen kalemlerin toplamını hesaplayıp fiş genel toplamını otomatik eşitleyeceğiz
     kalem_ids = request.form.getlist('kalem_ids')
+    yeni_toplam = 0.0
+
     for kid in kalem_ids:
         m = temiz_sayi(request.form.get(f'miktar_{kid}'))
         b = request.form.get(f'birim_{kid}', 'Adet')
         t = temiz_sayi(request.form.get(f'satir_toplam_{kid}'))
+        yeni_toplam += t
         bf = round(t / m, 2) if m > 0 else t
         
         c.execute("UPDATE urun_kalemleri SET miktar=?, birim=?, birim_fiyat=?, satir_toplam=? WHERE id=?", (m, b, bf, t, kid))
@@ -355,26 +345,39 @@ def toplu_guncelle():
                     au_id = row_au[0]
                     c.execute("INSERT OR REPLACE INTO urun_sozlugu (ham_isim, ana_urun_id) VALUES (?, ?)", (ham_isim, au_id))
                     c.execute("UPDATE urun_kalemleri SET ana_urun_id = ? WHERE ham_urun_adi = ?", (au_id, ham_isim))
+
+    # Fişin toplam tutarını yapılan düzeltmeler sonrasındaki satır toplamına eşitliyoruz (Madde 5 Çözümü)
+    c.execute("UPDATE fisler SET firma_adi=?, sube_adi=?, tarih=?, fis_no=?, toplam_tutar=? WHERE id=?", 
+              (yeni_firma, yeni_sube, yeni_tarih, yeni_fis_no, str(yeni_toplam), fis_id))
+    
+    c.execute("SELECT ham_firma_adi FROM fisler WHERE id = ?", (fis_id,))
+    row_f = c.fetchone()
+    ham_f = row_f[0] if row_f and row_f[0] else yeni_firma
+    
+    c.execute("""
+        INSERT INTO firma_sozlugu (ocr_firma, temiz_firma, sube_adi) 
+        VALUES (?, ?, ?) 
+        ON CONFLICT(ocr_firma) 
+        DO UPDATE SET temiz_firma = ?, sube_adi = ?
+    """, (ham_f, yeni_firma, yeni_sube, yeni_firma, yeni_sube))
             
     conn.commit()
     conn.close()
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
-# YENİ: DİNAMİK RAPORLAMA VE AI ANALİZ ROTASI
+# DİNAMİK RAPORLAMA VE FİLTREYE ÖZEL AI ANALİZİ
 @app.route('/raporlar')
 def raporlar():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Dropdown seçenekleri için verileri çek
     c.execute("SELECT DISTINCT firma_adi FROM fisler WHERE firma_adi IS NOT NULL AND firma_adi != ''")
     firmalar = [r['firma_adi'] for r in c.fetchall()]
 
     c.execute("SELECT DISTINCT sube_adi FROM fisler WHERE sube_adi IS NOT NULL AND sube_adi != ''")
     subeler = [r['sube_adi'] for r in c.fetchall()]
 
-    # Filtre Parametrelerini Al
     f_firma = request.args.get('firma', '').strip()
     f_sube = request.args.get('sube', '').strip()
     f_kategori = request.args.get('kategori', '').strip()
@@ -384,10 +387,9 @@ def raporlar():
     f_min = request.args.get('min_tutar', '').strip()
     f_maks = request.args.get('maks_tutar', '').strip()
 
-    # SQL Sorgusunu Oluştur
     query = """
-        SELECT f.firma_adi, f.sube_adi, f.tarih, f.fis_no, 
-               uk.ham_urun_adi, uk.satir_toplam, uk.tahmini_kategori,
+        SELECT f.id as fis_id, f.firma_adi, f.sube_adi, f.tarih, f.fis_no, 
+               uk.id as kalem_id, uk.ham_urun_adi, uk.miktar, uk.birim, uk.birim_fiyat, uk.satir_toplam, uk.tahmini_kategori,
                au.temiz_urun_adi, au.kategori as ana_kategori
         FROM urun_kalemleri uk
         JOIN fisler f ON uk.fis_id = f.id
@@ -418,12 +420,12 @@ def raporlar():
     c.execute(query, params)
     rows = c.fetchall()
 
-    # İstatistik Hesaplamaları
     toplam_tutar = 0.0
     toplam_kalem = len(rows)
     kategori_toplamlari = {}
     market_toplamlari = {}
     fis_set = set()
+    filtrelenen_kalemler = []
 
     for r in rows:
         tot = r['satir_toplam'] if r['satir_toplam'] else 0.0
@@ -437,22 +439,34 @@ def raporlar():
         mkt = r['firma_adi'] if r['firma_adi'] else "Bilinmiyor"
         market_toplamlari[mkt] = market_toplamlari.get(mkt, 0.0) + tot
 
+        kalem_dict = dict(r)
+        kalem_dict['urun_gosterim'] = r['temiz_urun_adi'] if r['temiz_urun_adi'] else r['ham_urun_adi']
+        kalem_dict['miktar_str'] = format_virgul(r['miktar'])
+        kalem_dict['birim_fiyat_str'] = format_virgul(r['birim_fiyat'])
+        kalem_dict['satir_toplam_str'] = format_virgul(r['satir_toplam'])
+        filtrelenen_kalemler.append(kalem_dict)
+
     toplam_fis_sayisi = len(fis_set)
     ort_fis = (toplam_tutar / toplam_fis_sayisi) if toplam_fis_sayisi > 0 else 0.0
 
+    # YAPAY ZEKA YORUMU (Filtreye özel uyarlama - Madde 4)
     ai_yorum = ""
     if toplam_kalem > 0:
+        ozel_filtre_notu = ""
+        if f_urun or f_kategori:
+            ozel_filtre_notu = f"Önemli Not: Kullanıcı özellikle şu filtreleri uyguladı -> Ürün/Arama: '{f_urun}', Kategori: '{f_kategori}'. Lütfen değerlendirmeni ve tavsiyelerini sadece bu filtrelenen ürün/kategori grubuna özel olarak odakla!"
+
         prompt_ozet = f"""
         Aşağıda bir kullanıcının harcama verileri yer almaktadır:
-        - Toplam Harcama: {toplam_tutar:.2f} TL
-        - Toplam Fiş Sayısı: {toplam_fis_sayisi}
-        - Toplam Aldığı Ürün Kalemi: {toplam_kalem}
+        - Uygulanan Filtreler (Ürün/Arama): {f_urun if f_urun else 'Yok'}, Kategori: {f_kategori if f_kategori else 'Yok'}
+        - Filtrelenen Toplam Harcama: {toplam_tutar:.2f} TL
+        - İlgili Fiş Sayısı: {toplam_fis_sayisi}
+        - Toplam Ürün Kalemi: {toplam_kalem}
         - Kategorilere Göre Dağılım: {kategori_toplamlari}
         - Marketlere Göre Dağılım: {market_toplamlari}
+        {ozel_filtre_notu}
 
-        Lütfen bir finans uzmanı gibi davranarak bu kullanıcının harcama alışkanlıklarını değerlendir.
-        En çok bütçe ayırdığı kategorileri, gittiği marketleri yorumla. 
-        Tasarruf edebileceği alanları ve bütçe tavsiyelerini 3-4 paragrafta samimi, yapıcı ve profesyonel bir Türkçe ile yaz. 
+        Lütfen bir finans uzmanı gibi davranarak bu verileri analiz et. Eğer spesifik bir ürün (örneğin makarna) aranmışsa, bu ürünün fiyat değişimini, hangi marketlerden alındığını ve bütçeye etkisini yorumla. 3-4 paragrafta samimi, yapıcı ve profesyonel bir Türkçe ile yaz. 
         Cevabını HTML formatında (<p>, <strong>, <ul>, <li> etiketleri kullanarak) ver.
         """
         try:
@@ -486,7 +500,8 @@ def raporlar():
         kat_data=list(kategori_toplamlari.values()),
         market_labels=list(market_toplamlari.keys()),
         market_data=list(market_toplamlari.values()),
-        ai_yorum=ai_yorum
+        ai_yorum=ai_yorum,
+        filtrelenen_kalemler=filtrelenen_kalemler
     )
 
 @app.route('/kalem-ekle', methods=['POST'])
@@ -515,6 +530,23 @@ def kalem_ekle():
     conn.close()
     return redirect(url_for('fis_detay', fis_id=fid))
 
+# Satır silme rotası (Madde 6 Çözümü)
+@app.route('/kalem-sil/<int:kalem_id>')
+def kalem_sil(kalem_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT fis_id FROM urun_kalemleri WHERE id = ?", (kalem_id,))
+    row = c.fetchone()
+    fis_id = row[0] if row else None
+    
+    c.execute("DELETE FROM urun_kalemleri WHERE id = ?", (kalem_id,))
+    conn.commit()
+    conn.close()
+    
+    if fis_id:
+        return redirect(url_for('fis_detay', fis_id=fis_id))
+    return redirect(url_for('ana_sayfa'))
+
 @app.route('/fis-sil/<int:fis_id>')
 def fis_sil(fis_id):
     conn = sqlite3.connect(DB_FILE)
@@ -537,8 +569,6 @@ def sozluk_sil():
     conn.close()
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
-
-# KULLANICI GİRİŞ SAYFASI
 @app.route('/giris', methods=['GET', 'POST'])
 def giris():
     hata = ""
@@ -546,11 +576,9 @@ def giris():
         kullanici = request.form.get('kullanici')
         sifre = request.form.get('sifre')
         
-        # .env dosyasından veya Render Environment değişkenlerinden okur
         admin_kullanici = os.environ.get("ADMIN_USER", "admin")
         admin_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
         
-        # Kullanıcı adı doğru ve şifre hash eşleşmesi başarılıysa
         if kullanici == admin_kullanici and check_password_hash(admin_hash, sifre):
             session['giris_yapildi'] = True
             return redirect(url_for('ana_sayfa'))
@@ -559,24 +587,20 @@ def giris():
             
     return render_template('giris.html', hata=hata)
 
-# ÇIKIŞ YAPMA
 @app.route('/cikis')
 def cikis():
     session.pop('giris_yapildi', None)
     return redirect(url_for('giris'))
 
-# HER SAYFADA OTURUM KONTROLÜ (Decorator)
 @app.before_request
 def oturum_kontrol():
     serbest_rotalar = ['giris']
     if request.endpoint not in serbest_rotalar and not session.get('giris_yapildi'):
         return redirect(url_for('giris'))
-    
 
 if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
 else:
-    # Gunicorn ile çalışırken tabloların hazır olmasını sağlar
     init_db()
