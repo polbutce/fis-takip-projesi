@@ -22,17 +22,16 @@
         </div>
     {% else %}
         <div class="alert alert-success d-flex align-items-center justify-content-between mb-4 py-2">
-            <div>✅ <strong>Tüm Toplamlar Tam Uyuşuyor:</strong> Satır tutarlarının toplamı fiş genel toplamı ({{ fis.toplam_tutar_formatted }} TL) ile birebir aynıdır.</div>
+            <div>✅ <strong>Tüm Toplamlar Tam Uyuşuyor:</strong> Satır tutarlarının toplamı fiş genel toplamı ile birebir aynıdır.</div>
         </div>
     {% endif %}
 
     <form action="/toplu-guncelle" method="POST">
         <input type="hidden" name="fis_id" value="{{ fis.id }}">
         
-        <!-- ÜST BİLGİLER -->
         <div class="card mb-4 border-primary shadow-sm">
             <div class="card-header bg-primary text-white fw-bold">
-                📋 Fiş Üst Bilgileri (Mağaza, Şube, Tarih, Fiş No Düzenleme)
+                📋 Fiş Üst Bilgileri
             </div>
             <div class="card-body row g-3">
                 <div class="col-md-4">
@@ -67,10 +66,11 @@
                             <tr>
                                 <th>Fişte Yazan İsim</th>
                                 <th>Ana Ürün Kartı / Kategori</th>
-                                <th class="text-center" style="width:90px;">Miktar</th>
-                                <th class="text-center" style="width:120px;">Birim</th>
-                                <th class="text-end" style="width:110px;">B.Fiyatı</th>
-                                <th class="text-end" style="width:130px;">Satır Toplamı</th>
+                                <th class="text-center" style="width:80px;">Miktar</th>
+                                <th class="text-center" style="width:110px;">Birim</th>
+                                <th class="text-end" style="width:100px;">B.Fiyatı</th>
+                                <th class="text-end" style="width:110px;">Toplam</th>
+                                <th class="text-center" style="width:50px;">Sil</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -83,21 +83,21 @@
                                     
                                     <td>
                                         {% if u.temiz_isim %}
-                                            <!-- EŞLEŞMİŞ ÜRÜN İÇİN GİZLİ INPUTLAR (Verinin kaybolmasını önler) -->
                                             <input type="hidden" name="yeni_ana_{{ u.id }}" value="{{ u.temiz_isim }}">
                                             <input type="hidden" name="kategori_{{ u.id }}" value="{{ u.kategori }}">
-                                            
                                             <span class="badge bg-success fs-6">{{ u.temiz_isim }}</span>
                                             <span class="badge bg-info text-dark font-monospace">{{ u.kategori }}</span>
                                             <a href="/sozluk-sil?ham={{ u.ham_urun_adi }}&fis_id={{ fis.id }}" class="text-danger text-decoration-none ms-1" title="Eşleşmeyi Kaldır">❌</a>
                                         {% else %}
-                                            <!-- EŞLEŞMEMİŞ ÜRÜN İÇİN GİRİŞ ALANLARI -->
                                             <div class="d-flex gap-1">
                                                 <input type="text" name="yeni_ana_{{ u.id }}" class="form-control form-control-sm border-warning" value="{{ u.oneri }}" placeholder="Ana Ürün Adı">
                                                 <select name="kategori_{{ u.id }}" class="form-select form-select-sm border-warning" style="width:130px;">
+                                                    {% for kat in birimler or [] %} {% endfor %}
                                                     <option value="Gıda" {% if u.tahmini_kategori == 'Gıda' %}selected{% endif %}>Gıda</option>
                                                     <option value="Temizlik" {% if u.tahmini_kategori == 'Temizlik' %}selected{% endif %}>Temizlik</option>
                                                     <option value="Kozmetik" {% if u.tahmini_kategori == 'Kozmetik' %}selected{% endif %}>Kozmetik</option>
+                                                    <option value="İlaç" {% if u.tahmini_kategori == 'İlaç' %}selected{% endif %}>İlaç</option>
+                                                    <option value="Züccaciye / Mutfak" {% if u.tahmini_kategori == 'Züccaciye / Mutfak' %}selected{% endif %}>Züccaciye / Mutfak</option>
                                                     <option value="Kırtasiye" {% if u.tahmini_kategori == 'Kırtasiye' %}selected{% endif %}>Kırtasiye</option>
                                                     <option value="Hırdavat" {% if u.tahmini_kategori == 'Hırdavat' %}selected{% endif %}>Hırdavat</option>
                                                     <option value="Giyim" {% if u.tahmini_kategori == 'Giyim' %}selected{% endif %}>Giyim</option>
@@ -130,6 +130,11 @@
                                     <td>
                                         <input type="text" name="satir_toplam_{{ u.id }}" class="form-control form-control-sm text-end font-monospace text-success fw-bold" value="{{ u.satir_toplam_str }}">
                                     </td>
+
+                                    <td class="text-center">
+                                        <!-- Satır Silme Butonu (Madde 6) -->
+                                        <a href="/kalem-sil/{{ u.id }}" class="btn btn-outline-danger btn-sm py-0 px-1" onclick="return confirm('Bu satırı silmek istediğinize emin misiniz?');" title="Satırı Sil">🗑️</a>
+                                    </td>
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -138,7 +143,7 @@
             </div>
             
             <div class="card-footer bg-light d-flex justify-content-between align-items-center py-2">
-                <span class="text-muted small">Üst bilgileri veya ürünleri değiştirip tek tıkla kaydedebilirsiniz.</span>
+                <span class="text-muted small">Değişiklikleri kaydettiğinizde toplam tutar otomatik eşitlenecektir.</span>
                 <button type="submit" class="btn btn-primary px-4 fw-bold">
                     💾 Tüm Değişiklikleri Kaydet
                 </button>
@@ -146,7 +151,6 @@
         </div>
     </form>
 
-    <!-- ELLE YENİ ÜRÜN EKLEME -->
     <div class="card border-info shadow-sm mt-4">
         <div class="card-header bg-info text-white fw-bold">
             ➕ Okunamayan / Eksik Ürünü Elle Fişe Ekle
@@ -156,7 +160,7 @@
                 <input type="hidden" name="fis_id" value="{{ fis.id }}">
                 <div class="col-md-4">
                     <label class="form-label small fw-bold mb-1">Ürün Adı</label>
-                    <input type="text" name="ham_urun_adi" class="form-control form-control-sm" placeholder="Örn: ANKARA 500 GR YUKSUK" required>
+                    <input type="text" name="ham_urun_adi" class="form-control form-control-sm" placeholder="Örn: SÜT 1 LT" required>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small fw-bold mb-1">Miktar</label>

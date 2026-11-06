@@ -9,7 +9,6 @@
 </head>
 <body class="bg-light">
 
-    <!-- SABİT ÜST BAŞLIK -->
     <header class="bg-dark text-white py-3 shadow-sm" style="background-color: #2c3e50 !important;">
         <div class="container d-flex justify-content-between align-items-center">
             <h1 class="h4 m-0"><strong>🧾 POL Akıllı Fiş Yönetimi</strong></h1>
@@ -20,16 +19,13 @@
         </div>
     </header>
 
-    <!-- ÜST YATAY MENÜ (İstediğiniz Sırada ve Renkte) -->
     <nav class="border-bottom shadow-sm mb-4" style="background-color: #2c3e50;">
         <div class="container py-2 d-flex gap-2 flex-wrap">
-            <a href="/" class="btn btn-primary btn-sm fw-bold">🏠 Ana Sayfa</a>
-            <a href="/" class="btn btn-primary btn-sm fw-bold">📋 Fiş Listesi</a>
+            <a href="/" class="btn btn-primary btn-sm fw-bold">🏠 Ana Sayfa & Fiş Listesi</a>
             <a href="/raporlar" class="btn btn-primary btn-sm fw-bold">📊 Harcama Rapor ve Analizi</a>
         </div>
     </nav>
 
-    <!-- DİNAMİK İÇERİK ALANI -->
     <main class="container mb-5">
         {% block content %}{% endblock %}
     </main>
