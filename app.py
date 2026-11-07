@@ -1,4 +1,4 @@
-import os, base64, sqlite3, io, re, time
+import os, base64, sqlite3, io, re, time, requests
 from datetime import datetime
 from flask import Flask, render_template, redirect, url_for, request, session
 from PIL import Image
@@ -15,6 +15,64 @@ app.secret_key = "cok-gizli-bir-anahtar-kelime"
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"), timeout=60.0)
 DB_FILE = "veritabanı.db"
 
+# --- GİTİHUB OTOMATİK SENKRONİZASYON (YEDEKLEME) FONKSİYONLARI ---
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO") # Örn: kullanici_adi/fis_projesi
+
+def github_veritabanini_indir():
+    """Uygulama açıldığında GitHub'da kayıtlı veritabanı varsa indirir."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_FILE}"
+        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            file_data = res.json()
+            content_encoded = file_data.get("content")
+            if content_encoded:
+                db_bytes = base64.b64decode(content_encoded)
+                with open(DB_FILE, "wb") as f:
+                    f.write(db_bytes)
+                print("Veritabanı GitHub'dan başarıyla senkronize edildi.")
+    except Exception as e:
+        print(f"GitHub'dan veritabanı çekerken hata: {e}")
+
+def github_veritabanini_yukle():
+    """Her veri değişiminden sonra güncel veritabanını GitHub reposuna otomatik commitler."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return
+    try:
+        if not os.path.exists(DB_FILE):
+            return
+        
+        with open(DB_FILE, "rb") as f:
+            encoded_content = base64.b64encode(f.read()).decode('utf-8')
+            
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_FILE}"
+        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        
+        # Mevcut dosyanın SHA değerini almamız gerekiyor (GitHub API güncelleme şartı)
+        get_res = requests.get(url, headers=headers)
+        sha = get_res.json().get("sha") if get_res.status_code == 200 else None
+        
+        payload = {
+            "message": f"Otomatik veritabanı yedeği - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "content": encoded_content,
+            "branch": "main" # Ana branch adınız master ise burayı 'master' yapabilirsiniz
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        put_res = requests.put(url, headers=headers, json=payload)
+        if put_res.status_code in [200, 201]:
+            print("Veritabanı başarıyla GitHub'a yedeklendi.")
+        else:
+            print(f"GitHub yedekleme hatası: {put_res.text}")
+    except Exception as e:
+        print(f"GitHub veritabanı yükleme istisnası: {e}")
+# -------------------------------------------------------------
+
 STANDART_BIRIMLER = [
     "Adet", "Kilogram", "Gram", "Litre", "Mililitre", 
     "Paket", "Kutu", "Koli", "Rulo", "Demet", "Şişe", "Metre"
@@ -27,6 +85,9 @@ KATEGORILER = [
 ]
 
 def init_db():
+    # Uygulama başlarken önce GitHub'daki veritabanını kontrol et/indir
+    github_veritabanini_indir()
+    
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('CREATE TABLE IF NOT EXISTS fisler (id INTEGER PRIMARY KEY AUTOINCREMENT, dosya_adi TEXT, firma_adi TEXT, ham_firma_adi TEXT, sube_adi TEXT, tarih TEXT, fis_no TEXT, toplam_tutar TEXT)')
@@ -155,7 +216,6 @@ def tara():
             c.execute("SELECT ocr_firma, temiz_firma, sube_adi FROM firma_sozlugu")
             market_hafizasi = c.fetchall()
 
-            # Hafızadaki ana ürünleri ve sözlüğü çek (%80 eşleşme için)
             c.execute("SELECT us.ham_isim, au.id, au.temiz_urun_adi, au.kategori FROM urun_sozlugu us JOIN ana_urunler au ON us.ana_urun_id = au.id")
             urun_hafizasi = c.fetchall()
 
@@ -201,7 +261,6 @@ def tara():
                     bf = round(tot / mlar, 2) if mlar > 0 else tot
                     tahmini_kat = kategori_tahmin_et(h_isim)
                     
-                    # Hafızadan %80 eşleşme kontrolü
                     au_id = None
                     for h_ham, a_id, a_temiz, a_kat in urun_hafizasi:
                         if fuzz.token_sort_ratio(h_isim.upper(), h_ham.upper()) >= 80:
@@ -214,6 +273,10 @@ def tara():
             
             conn.commit()
             conn.close()
+            
+            # Veri değişti, hemen GitHub'a yedekle
+            github_veritabanini_yukle()
+            
         except Exception as e:
             print(f"Fiş tarama hatası: {e}")
             
@@ -311,7 +374,6 @@ def toplu_guncelle():
     yeni_tarih = request.form.get('tarih', '').strip()
     yeni_fis_no = request.form.get('fis_no', '').strip()
     
-    # Güncellenen kalemlerin toplamını hesaplayıp fiş genel toplamını otomatik eşitleyeceğiz
     kalem_ids = request.form.getlist('kalem_ids')
     yeni_toplam = 0.0
 
@@ -346,7 +408,6 @@ def toplu_guncelle():
                     c.execute("INSERT OR REPLACE INTO urun_sozlugu (ham_isim, ana_urun_id) VALUES (?, ?)", (ham_isim, au_id))
                     c.execute("UPDATE urun_kalemleri SET ana_urun_id = ? WHERE ham_urun_adi = ?", (au_id, ham_isim))
 
-    # Fişin toplam tutarını yapılan düzeltmeler sonrasındaki satır toplamına eşitliyoruz (Madde 5 Çözümü)
     c.execute("UPDATE fisler SET firma_adi=?, sube_adi=?, tarih=?, fis_no=?, toplam_tutar=? WHERE id=?", 
               (yeni_firma, yeni_sube, yeni_tarih, yeni_fis_no, str(yeni_toplam), fis_id))
     
@@ -363,9 +424,12 @@ def toplu_guncelle():
             
     conn.commit()
     conn.close()
+    
+    # Veriler güncellendi, GitHub'a yedekle
+    github_veritabanini_yukle()
+    
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
-# DİNAMİK RAPORLAMA VE FİLTREYE ÖZEL AI ANALİZİ
 @app.route('/raporlar')
 def raporlar():
     conn = sqlite3.connect(DB_FILE)
@@ -449,7 +513,6 @@ def raporlar():
     toplam_fis_sayisi = len(fis_set)
     ort_fis = (toplam_tutar / toplam_fis_sayisi) if toplam_fis_sayisi > 0 else 0.0
 
-    # YAPAY ZEKA YORUMU (Filtreye özel uyarlama - Madde 4)
     ai_yorum = ""
     if toplam_kalem > 0:
         ozel_filtre_notu = ""
@@ -466,8 +529,7 @@ def raporlar():
         - Marketlere Göre Dağılım: {market_toplamlari}
         {ozel_filtre_notu}
 
-        Lütfen bir finans uzmanı gibi davranarak bu verileri analiz et. Eğer spesifik bir ürün (örneğin makarna) aranmışsa, bu ürünün fiyat değişimini, hangi marketlerden alındığını ve bütçeye etkisini yorumla. 3-4 paragrafta samimi, yapıcı ve profesyonel bir Türkçe ile yaz. 
-        Cevabını HTML formatında (<p>, <strong>, <ul>, <li> etiketleri kullanarak) ver.
+        Lütfen bir finans uzmanı gibi davranarak bu verileri analiz et. Eğer spesifik bir ürün aranmışsa fiyat değişimini yorumla. 3-4 paragrafta samimi ve profesyonel bir Türkçe ile HTML formatında (<p>, <strong>, <ul>, <li> etiketleri kullanarak) ver.
         """
         try:
             res = client.chat.completions.create(
@@ -528,9 +590,9 @@ def kalem_ekle():
         conn.commit()
         
     conn.close()
+    github_veritabanini_yukle()
     return redirect(url_for('fis_detay', fis_id=fid))
 
-# Satır silme rotası (Madde 6 Çözümü)
 @app.route('/kalem-sil/<int:kalem_id>')
 def kalem_sil(kalem_id):
     conn = sqlite3.connect(DB_FILE)
@@ -542,6 +604,8 @@ def kalem_sil(kalem_id):
     c.execute("DELETE FROM urun_kalemleri WHERE id = ?", (kalem_id,))
     conn.commit()
     conn.close()
+    
+    github_veritabanini_yukle()
     
     if fis_id:
         return redirect(url_for('fis_detay', fis_id=fis_id))
@@ -555,6 +619,8 @@ def fis_sil(fis_id):
     c.execute("DELETE FROM fisler WHERE id = ?", (fis_id,))
     conn.commit()
     conn.close()
+    
+    github_veritabanini_yukle()
     return redirect(url_for('ana_sayfa'))
 
 @app.route('/sozluk-sil')
@@ -567,6 +633,8 @@ def sozluk_sil():
     c.execute("UPDATE urun_kalemleri SET ana_urun_id = NULL WHERE ham_urun_adi = ?", (ham,))
     conn.commit()
     conn.close()
+    
+    github_veritabanini_yukle()
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
 @app.route('/giris', methods=['GET', 'POST'])
