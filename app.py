@@ -17,10 +17,9 @@ DB_FILE = "veritabanı.db"
 
 # --- GİTİHUB OTOMATİK SENKRONİZASYON (YEDEKLEME) FONKSİYONLARI ---
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GITHUB_REPO = os.environ.get("GITHUB_REPO") # Örn: kullanici_adi/fis_projesi
+GITHUB_REPO = os.environ.get("GITHUB_REPO")
 
 def github_veritabanini_indir():
-    """Uygulama açıldığında GitHub'da kayıtlı veritabanı varsa indirir."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
@@ -39,7 +38,6 @@ def github_veritabanini_indir():
         print(f"GitHub'dan veritabanı çekerken hata: {e}")
 
 def github_veritabanini_yukle():
-    """Her veri değişiminden sonra güncel veritabanını GitHub reposuna otomatik commitler."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
@@ -52,14 +50,13 @@ def github_veritabanini_yukle():
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_FILE}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
         
-        # Mevcut dosyanın SHA değerini almamız gerekiyor (GitHub API güncelleme şartı)
         get_res = requests.get(url, headers=headers)
         sha = get_res.json().get("sha") if get_res.status_code == 200 else None
         
         payload = {
             "message": f"Otomatik veritabanı yedeği - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "content": encoded_content,
-            "branch": "main" # Ana branch adınız master ise burayı 'master' yapabilirsiniz
+            "branch": "main"
         }
         if sha:
             payload["sha"] = sha
@@ -71,7 +68,6 @@ def github_veritabanini_yukle():
             print(f"GitHub yedekleme hatası: {put_res.text}")
     except Exception as e:
         print(f"GitHub veritabanı yükleme istisnası: {e}")
-# -------------------------------------------------------------
 
 STANDART_BIRIMLER = [
     "Adet", "Kilogram", "Gram", "Litre", "Mililitre", 
@@ -85,7 +81,6 @@ KATEGORILER = [
 ]
 
 def init_db():
-    # Uygulama başlarken önce GitHub'daki veritabanını kontrol et/indir
     github_veritabanini_indir()
     
     conn = sqlite3.connect(DB_FILE)
@@ -273,10 +268,7 @@ def tara():
             
             conn.commit()
             conn.close()
-            
-            # Veri değişti, hemen GitHub'a yedekle
             github_veritabanini_yukle()
-            
         except Exception as e:
             print(f"Fiş tarama hatası: {e}")
             
@@ -368,7 +360,6 @@ def toplu_guncelle():
     c = conn.cursor()
     
     fis_id = request.form.get('fis_id')
-    
     yeni_firma = request.form.get('firma_adi', '').strip()
     yeni_sube = request.form.get('sube_adi', '').strip()
     yeni_tarih = request.form.get('tarih', '').strip()
@@ -424,8 +415,6 @@ def toplu_guncelle():
             
     conn.commit()
     conn.close()
-    
-    # Veriler güncellendi, GitHub'a yedekle
     github_veritabanini_yukle()
     
     return redirect(url_for('fis_detay', fis_id=fis_id))
@@ -482,7 +471,20 @@ def raporlar():
         params.append(temiz_sayi(f_maks))
 
     c.execute(query, params)
-    rows = c.fetchall()
+    all_rows = c.fetchall()
+
+    # Tarih filtresi python tarafında güvenli ve esnek şekilde uygulanıyor (GG.AA.YYYY veya YYYY-AA-GG)
+    rows = []
+    bas_dt = datetime.strptime(f_bas, "%Y-%m-%d") if f_bas else None
+    bit_dt = datetime.strptime(f_bit, "%Y-%m-%d") if f_bit else None
+
+    for r in all_rows:
+        t_parsed = tarih_parse_et(r['tarih'])
+        if bas_dt and t_parsed != datetime.min and t_parsed < bas_dt:
+            continue
+        if bit_dt and t_parsed != datetime.min and t_parsed > bit_dt:
+            continue
+        rows.append(r)
 
     toplam_tutar = 0.0
     toplam_kalem = len(rows)
@@ -490,6 +492,7 @@ def raporlar():
     market_toplamlari = {}
     fis_set = set()
     filtrelenen_kalemler = []
+    urun_detay_listesi = []
 
     for r in rows:
         tot = r['satir_toplam'] if r['satir_toplam'] else 0.0
@@ -503,12 +506,17 @@ def raporlar():
         mkt = r['firma_adi'] if r['firma_adi'] else "Bilinmiyor"
         market_toplamlari[mkt] = market_toplamlari.get(mkt, 0.0) + tot
 
+        U_ad = r['temiz_urun_adi'] if r['temiz_urun_adi'] else r['ham_urun_adi']
+        
         kalem_dict = dict(r)
-        kalem_dict['urun_gosterim'] = r['temiz_urun_adi'] if r['temiz_urun_adi'] else r['ham_urun_adi']
+        kalem_dict['urun_gosterim'] = U_ad
         kalem_dict['miktar_str'] = format_virgul(r['miktar'])
         kalem_dict['birim_fiyat_str'] = format_virgul(r['birim_fiyat'])
         kalem_dict['satir_toplam_str'] = format_virgul(r['satir_toplam'])
         filtrelenen_kalemler.append(kalem_dict)
+
+        # AI detay analizi için ürün özet stringi hazırlıyoruz
+        urun_detay_listesi.append(f"- {U_ad}: {r['miktar']} {r['birim']}, Birim Fiyat: {r['birim_fiyat']} TL, Toplam: {tot} TL ({mkt}, Tarih: {r['tarih']})")
 
     toplam_fis_sayisi = len(fis_set)
     ort_fis = (toplam_tutar / toplam_fis_sayisi) if toplam_fis_sayisi > 0 else 0.0
@@ -517,23 +525,31 @@ def raporlar():
     if toplam_kalem > 0:
         ozel_filtre_notu = ""
         if f_urun or f_kategori:
-            ozel_filtre_notu = f"Önemli Not: Kullanıcı özellikle şu filtreleri uyguladı -> Ürün/Arama: '{f_urun}', Kategori: '{f_kategori}'. Lütfen değerlendirmeni ve tavsiyelerini sadece bu filtrelenen ürün/kategori grubuna özel olarak odakla!"
+            ozel_filtre_notu = f"Önemli Not: Kullanıcı özellikle şu filtreleri uyguladı -> Ürün/Arama: '{f_urun}', Kategori: '{f_kategori}'. Lütfen değerlendirmeni ve tavsiyelerini genel bir özetle geçiştirme; filtrelenen bu spesifik ürünlerin miktarlarına, birim fiyatlarına, toplu alım/stok avantajlarına veya atıştırmalık/abur cubur gibi tüketim alışkanlıklarına odaklanarak derinlemesine yorumla!"
+
+        # AI promptuna ilk 30 ürün detayını ekliyoruz ki spesifik yorum yapabilsin
+        urunler_ozeti = "\n".join(urun_detay_listesi[:30])
 
         prompt_ozet = f"""
-        Aşağıda bir kullanıcının harcama verileri yer almaktadır:
-        - Uygulanan Filtreler (Ürün/Arama): {f_urun if f_urun else 'Yok'}, Kategori: {f_kategori if f_kategori else 'Yok'}
+        Aşağıda bir kullanıcının harcama verileri ve filtrelenen ürün kalemleri yer almaktadır:
+        - Uygulanan Filtreler -> Ürün/Arama: '{f_urun if f_urun else 'Yok'}', Kategori: '{f_kategori if f_kategori else 'Yok'}', Tarih Aralığı: {f_bas or 'Tümü'} ile {f_bit or 'Tümü'}
         - Filtrelenen Toplam Harcama: {toplam_tutar:.2f} TL
         - İlgili Fiş Sayısı: {toplam_fis_sayisi}
         - Toplam Ürün Kalemi: {toplam_kalem}
         - Kategorilere Göre Dağılım: {kategori_toplamlari}
         - Marketlere Göre Dağılım: {market_toplamlari}
+
+        İşte filtrelenen ürünlerin detaylı listesi:
+        {urunler_ozeti}
+
         {ozel_filtre_notu}
 
-        Lütfen bir finans uzmanı gibi davranarak bu verileri analiz et. Eğer spesifik bir ürün aranmışsa fiyat değişimini yorumla. 3-4 paragrafta samimi ve profesyonel bir Türkçe ile HTML formatında (<p>, <strong>, <ul>, <li> etiketleri kullanarak) ver.
+        Lütfen bir finans ve bütçe uzmanı gibi davranarak bu verileri analiz et. Ürün bazlı arama yapıldığında birim fiyatların uygunluğunu, toplu alım avantajlarını (örneğin kilolu un/bakliyat vb.), ya da atıştırmalık/abur cubur gibi harcamaların bütçeye etkisini somut rakamlarla ele al. 3-4 paragrafta samimi, yapıcı ve profesyonel bir Türkçe ile yaz. 
+        Cevabını HTML formatında (<p>, <strong>, <ul>, <li> etiketleri kullanarak) ver.
         """
         try:
             res = client.chat.completions.create(
-                model="qwen/qwen3.8-27b", max_tokens=700,
+                model="qwen/qwen3.8-27b", max_tokens=800,
                 messages=[{"role": "user", "content": prompt_ozet}]
             )
             ai_yorum = get_content_safely(res)
@@ -604,7 +620,6 @@ def kalem_sil(kalem_id):
     c.execute("DELETE FROM urun_kalemleri WHERE id = ?", (kalem_id,))
     conn.commit()
     conn.close()
-    
     github_veritabanini_yukle()
     
     if fis_id:
@@ -619,7 +634,6 @@ def fis_sil(fis_id):
     c.execute("DELETE FROM fisler WHERE id = ?", (fis_id,))
     conn.commit()
     conn.close()
-    
     github_veritabanini_yukle()
     return redirect(url_for('ana_sayfa'))
 
@@ -633,7 +647,6 @@ def sozluk_sil():
     c.execute("UPDATE urun_kalemleri SET ana_urun_id = NULL WHERE ham_urun_adi = ?", (ham,))
     conn.commit()
     conn.close()
-    
     github_veritabanini_yukle()
     return redirect(url_for('fis_detay', fis_id=fis_id))
 
